@@ -40,6 +40,8 @@ export POD_CIDR='["192.168.0.0/16"]'
 clusterctl init --kubeconfig-context "$management" --core "cluster-api:$capi_version" \
   --bootstrap "kubeadm:$capi_version" --control-plane "kubeadm:$capi_version" \
   --infrastructure "docker:$capi_version" --wait-providers --wait-provider-timeout 300
+"${mgmt[@]}" -n capd-system wait --for=jsonpath='{.subsets[0].addresses[0].ip}' \
+  endpoints/capd-webhook-service --timeout=90s
 
 if [ -n "$("${mgmt[@]}" get clusters.cluster.x-k8s.io -n default -o name)" ]; then
   echo "Use a fresh dedicated management cluster without existing workload Clusters." >&2
@@ -48,7 +50,17 @@ fi
 clusterctl generate cluster "$workload" --kubeconfig-context "$management" --infrastructure docker --flavor development \
   --kubernetes-version "$k8s_version" --control-plane-machine-count 1 --worker-machine-count 1 \
   > "$scratch/cluster.yaml"
-"${mgmt[@]}" apply -f "$scratch/cluster.yaml"
+for attempt in 1 2 3 4 5 6; do
+  if output=$("${mgmt[@]}" apply -f "$scratch/cluster.yaml" 2>&1); then
+    printf '%s\n' "$output"
+    break
+  fi
+  printf '%s\n' "$output" >&2
+  if [ "$attempt" = 6 ] || ! grep -Eq 'failed calling webhook.*(connection refused|no endpoints available)' <<< "$output"; then
+    exit 1
+  fi
+  sleep 3
+done
 "${mgmt[@]}" -n default wait --for=create "secret/$workload-kubeconfig" --timeout=300s
 clusterctl get kubeconfig "$workload" --kubeconfig-context "$management" > "$scratch/workload.kubeconfig"
 workload_context=$(kubectl --kubeconfig "$scratch/workload.kubeconfig" config current-context)
