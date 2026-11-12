@@ -35,6 +35,18 @@ kubectl --context kind-weather-infra -n weather port-forward service/weather-age
 
 The CLI exits with 0 for healthy, 1 for findings, and 2 when it cannot inspect. Worker counts assume the control-plane Nodes carry the standard control-plane or legacy master label. Deploying or scaling the service changes Pod replicas; it does not add worker Nodes.
 
+## Weather RAG security regression
+
+The Weather Agent also exposes a fixture `POST /rag/answer` endpoint. The existing `GET /ask` API is unchanged. The 12 synthetic evaluation cases are built around local rainfall observations, including the same 12 mm Hangzhou reading, injected instructions in retrieved evidence, and missing evidence.
+
+After building and loading the image with the kind demo above, run:
+
+```bash
+python3 -m rag_infra.cluster --context kind-weather-infra --image weather-agent:demo --serve-weather
+```
+
+The command deploys baseline and regressed Weather Agent instances in an isolated namespace on the same cluster. It runs four Indexed Job shards with up to two in parallel. The baseline must pass; the regressed fixture must complete all 12 cases but block release on one injection case; a separate oversized CPU request must produce a scheduler failure and an incomplete report. The release gate also checks that the test dataset and backend type agree. Reports in `artifacts/rag-eval/` distinguish application regressions from incomplete execution and include the scheduler reason. GitHub Actions publishes the reports. These are workflow checks with deterministic fixtures, not real-model safety results.
+
 ## Cluster API lifecycle lab
 
 This is a separate exercise for changing actual worker-node count. Use the [Cluster API Docker-provider Quick Start](https://cluster-api.sigs.k8s.io/user/quick-start), including workload networking/CNI and Docker Desktop kubeconfig instructions. The Docker provider is for development. The provided management-cluster config mounts the host Docker socket; reserve it for a disposable local lab.

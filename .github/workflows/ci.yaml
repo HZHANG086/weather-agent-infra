@@ -15,3 +15,9 @@ jobs:
           config: k8s/kind.yaml
           wait: 120s
       - run: bash scripts/demo-kind.sh --node-failure
+      - run: python3 -m rag_infra.cluster --context kind-weather-infra --image weather-agent:demo --serve-weather
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: weather-rag-eval-reports
+          path: artifacts/rag-eval/

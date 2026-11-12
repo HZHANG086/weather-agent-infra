@@ -5,6 +5,8 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
+from rag_infra.serve import answer_post
+
 # Each city links to observations, which in turn link to a demo rule.
 CITIES = {
     "hangzhou": ("demo-hz-01", "demo-hz-02"),
@@ -41,6 +43,9 @@ def answer(city: str, intent: str) -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
+    def do_POST(self) -> None:
+        answer_post(self, self.server.rag_profile)
+
     def do_GET(self) -> None:
         url = urlsplit(self.path)
         status = 200
@@ -68,8 +73,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--rag-profile", choices=["guarded", "regressed"], default="guarded")
     args = parser.parse_args()
     with ThreadingHTTPServer((args.host, args.port), Handler) as server:
+        server.rag_profile = args.rag_profile
         server.serve_forever()
 
 
