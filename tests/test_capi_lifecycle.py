@@ -1,6 +1,6 @@
 import unittest
 
-from capi_lifecycle import BLOCK_CREATE, summarize
+from capi_lifecycle import PAUSED, summarize
 
 
 def topology(count):
@@ -27,10 +27,10 @@ class LifecycleTest(unittest.TestCase):
         propagation = summarize(topology(2), [{"spec": {"replicas": 1}}], [], [first], nodes)
         self.assertIn("WaitingForMachineDeployment", [f["reason"] for f in propagation["findings"]])
 
-        paused_set = {"metadata": {"name": "md-0", "uid": "set-1", "annotations": {BLOCK_CREATE: "true"}},
+        paused_set = {"metadata": {"name": "md-0", "uid": "set-1", "annotations": {PAUSED: "true"}},
                       "spec": {"replicas": 2}}
         blocked = summarize(topology(2), [{"spec": {"replicas": 2}}], [paused_set], [first], nodes)
-        self.assertIn("MachineCreationDisabled", [f["reason"] for f in blocked["findings"]])
+        self.assertIn("MachineSetPaused", [f["reason"] for f in blocked["findings"]])
         self.assertEqual(blocked["workers"]["machines"], 1)
 
         second = machine("second", conditions=[{"type": "InfrastructureReady", "status": "False",

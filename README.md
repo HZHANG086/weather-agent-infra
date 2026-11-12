@@ -54,7 +54,7 @@ cluster and uses Cluster API's Docker provider to create a separate workload
 cluster. It changes actual worker Nodes through the ClusterClass topology:
 
 1. Start with one worker, deploy the demo Weather Agent and check a synthetic rainfall query.
-2. Disable Machine creation on the existing MachineSet and request two workers.
+2. Pause reconciliation on the existing MachineSet and request two workers.
    Verify that the requested count reaches the MachineDeployment, the second
    Machine is blocked, and the original worker still serves the query.
 3. Remove the block. Wait for two Ready workers, then schedule a probe on the new

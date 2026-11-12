@@ -15,6 +15,7 @@ CLUSTER_LABEL = "cluster.x-k8s.io/cluster-name"
 CONTROL_LABELS = {"cluster.x-k8s.io/control-plane", "node-role.kubernetes.io/control-plane",
                   "node-role.kubernetes.io/master"}
 BLOCK_CREATE = "cluster.x-k8s.io/disable-machine-create"
+PAUSED = "cluster.x-k8s.io/paused"
 
 
 def condition(resource, key):
@@ -41,15 +42,18 @@ def summarize(cluster, deployments, sets, machines, nodes):
         finding("topology", "WaitingForMachineDeployment",
                 f"Cluster topology requests {expected}; MachineDeployments request {deployment_replicas}")
     for item in sets:
-        if item["metadata"].get("annotations", {}).get(BLOCK_CREATE) != "true":
+        annotations = item["metadata"].get("annotations", {})
+        paused = PAUSED in annotations
+        if not paused and annotations.get(BLOCK_CREATE) != "true":
             continue
         desired = item.get("spec", {}).get("replicas", 0)
         owned = sum(any(ref.get("uid") == item["metadata"]["uid"] and ref.get("controller")
                         for ref in m["metadata"].get("ownerReferences", []))
                     and not m["metadata"].get("deletionTimestamp") for m in machines)
         if owned < desired:
-            finding("machineset/" + item["metadata"]["name"], "MachineCreationDisabled",
-                    f"{BLOCK_CREATE}=true; {owned}/{desired} Machines present")
+            finding("machineset/" + item["metadata"]["name"],
+                    "MachineSetPaused" if paused else "MachineCreationDisabled",
+                    f"{PAUSED if paused else BLOCK_CREATE} is set; {owned}/{desired} Machines present")
     if active_machines != expected:
         finding("cluster/machines", "MachineCountMismatch", f"expected={expected}, active={active_machines}")
 

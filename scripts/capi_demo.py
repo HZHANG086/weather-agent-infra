@@ -6,7 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from capi_lifecycle import BLOCK_CREATE, CLUSTER, CLUSTER_LABEL, MACHINE, MACHINESET, snapshot
+from capi_lifecycle import CLUSTER, CLUSTER_LABEL, MACHINE, MACHINESET, PAUSED, snapshot
 from inspect_cluster import kubectl_json
 
 MANAGEMENT = "kind-weather-management"
@@ -122,18 +122,18 @@ def run(context, archive, report):
     (machine_set,) = kubectl_json(MANAGEMENT, MACHINESET, "default",
                                   selector=f"{CLUSTER_LABEL}={CLUSTER_NAME}")["items"]
     ms = machine_set["metadata"]["name"]
-    kubectl(MANAGEMENT, "-n", "default", "annotate", MACHINESET, ms, f"{BLOCK_CREATE}=true")
+    kubectl(MANAGEMENT, "-n", "default", "annotate", MACHINESET, ms, f"{PAUSED}=true")
     try:
         change_replicas(1, 2)
         blocked = wait_for(context, "scale-up blocked before provisioning",
                            lambda s: s["workers"] == {
                                "desired": 2, "deployment_replicas": 2, "machines": 1,
                                "registered": 1, "ready_and_uncordoned": 1,
-                           } and any(f["reason"] == "MachineCreationDisabled" for f in s["findings"]))
+                           } and any(f["reason"] == "MachineSetPaused" for f in s["findings"]))
         report["blocked_scale_up"] = blocked
         report["blocked_probe"] = verify_weather(context, "weather-during-block", old["node"])
     finally:
-        kubectl(MANAGEMENT, "-n", "default", "annotate", MACHINESET, ms, f"{BLOCK_CREATE}-")
+        kubectl(MANAGEMENT, "-n", "default", "annotate", MACHINESET, ms, f"{PAUSED}-")
 
     expanded = wait_for(context, "two workers available", lambda s: converged(s, 2))
     (new,) = [machine for machine in expanded["machines"] if machine["node"] != old["node"]]
