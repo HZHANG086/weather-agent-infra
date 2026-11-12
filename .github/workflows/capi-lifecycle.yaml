@@ -6,6 +6,10 @@ jobs:
   docker-provider:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        experiment: [lifecycle, upgrade]
     steps:
       - uses: actions/checkout@v4
       - name: Raise the disposable runner's inotify budget for nested nodes
@@ -27,9 +31,15 @@ jobs:
           chmod +x "$RUNNER_TEMP/capi-bin/clusterctl"
           echo "$RUNNER_TEMP/capi-bin" >> "$GITHUB_PATH"
       - name: Verify node scale-up, blocked creation, recovery and scale-down
+        if: matrix.experiment == 'lifecycle'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash scripts/demo-capi.sh
+      - name: Roll the workers while measuring Weather Service availability
+        if: matrix.experiment == 'upgrade'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash scripts/demo-capi.sh --upgrade
       - name: Inspect the management cluster on failure
         if: failure()
         run: |
@@ -39,7 +49,13 @@ jobs:
           kubectl --context kind-weather-management -n capd-system logs deployment/capd-controller-manager --tail=100 || true
           docker ps -a --format '{{.Names}} {{.Status}}'
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && matrix.experiment == 'lifecycle'
         with:
           name: weather-capi-lifecycle-evidence
           path: artifacts/capi-lifecycle/report.json
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.experiment == 'upgrade'
+        with:
+          name: weather-capi-upgrade-evidence
+          path: artifacts/capi-upgrade/
+          if-no-files-found: error

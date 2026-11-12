@@ -4,6 +4,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 umask 077
 
+case "${1:-}" in
+  "") worker_count=1; experiment=scripts.capi_demo ;;
+  --upgrade) worker_count=0; experiment=scripts.capi_upgrade ;;
+  *) echo "Usage: $0 [--upgrade]" >&2; exit 2 ;;
+esac
+
 capi_version=v1.12.11
 k8s_version=v1.34.3
 management=kind-weather-management
@@ -48,7 +54,7 @@ if [ -n "$("${mgmt[@]}" get clusters.cluster.x-k8s.io -n default -o name)" ]; th
   exit 2
 fi
 clusterctl generate cluster "$workload" --kubeconfig-context "$management" --infrastructure docker --flavor development \
-  --kubernetes-version "$k8s_version" --control-plane-machine-count 1 --worker-machine-count 1 \
+  --kubernetes-version "$k8s_version" --control-plane-machine-count 1 --worker-machine-count "$worker_count" \
   > "$scratch/cluster.yaml"
 for attempt in 1 2 3 4 5 6; do
   if output=$("${mgmt[@]}" apply -f "$scratch/cluster.yaml" 2>&1); then
@@ -127,4 +133,4 @@ PY
 docker build -t weather-agent:demo .
 docker save -o "$scratch/weather-image.tar" weather-agent:demo
 
-python3 -m scripts.capi_demo --workload-context "$workload_context" --image-archive "$scratch/weather-image.tar"
+python3 -m "$experiment" --workload-context "$workload_context" --image-archive "$scratch/weather-image.tar"

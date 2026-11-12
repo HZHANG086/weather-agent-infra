@@ -103,6 +103,37 @@ python3 capi_lifecycle.py --workload-context '<workload-context>' \
 The lifecycle CLI expects explicit worker replica counts on a ClusterClass
 topology. MachinePools and autoscaler-managed worker counts are outside this lab.
 
+## Worker rolling upgrade and service availability
+
+Use a fresh management cluster as above and run `bash scripts/demo-capi.sh --upgrade`.
+The separate upgrade experiment keeps the control plane at v1.34.3 and rolls
+two workers from v1.34.0 to v1.34.3. The workers belong to a standalone Cluster
+API MachineDeployment so changing their version does not change the control
+plane. The controller creates at most one surge worker; a disruption budget
+protects at least one ready Weather replica during voluntary eviction. Required
+pod anti-affinity keeps the two replicas on distinct workers. The experiment
+checks both node identities and kubelet versions before and after replacement.
+
+A probe on the unchanged control plane sends one independent request per second
+to the Weather Service (including cluster DNS), from baseline through at least
+10 seconds after the final two replicas are ready. A successful response must
+match the synthetic Hangzhou evidence. The report includes:
+
+- Failure rate for requests scheduled between the upgrade request and the
+  observed return of two ready replicas on upgraded workers.
+- Longest observed interruption and recovery from the last interruption.
+  Each interval runs from the first failed request's start to the next successful
+  response in sample order. If all samples pass, the observed interruption is
+  zero and request recovery is not applicable.
+- Time from the upgrade request to two ready, separated replicas on upgraded
+  nodes, even if every HTTP request succeeds.
+
+The [lifecycle workflow](.github/workflows/capi-lifecycle.yaml) uploads
+`report.json` and `samples.jsonl` as `weather-capi-upgrade-evidence`. Missing
+probe samples or a missing healthy post-upgrade tail invalidate the measurement.
+This is an availability sample at one request per second, using synthetic
+observations in a disposable CPU cluster. Shorter outages can go unobserved.
+
 ## Publish to GitHub
 
 Use this directory as a standalone repository. It intentionally contains no institutional source, original observations, credentials, or CV files. To review it privately first, authenticate with `gh auth login` and run the following from this directory. Omit `git init`, staging and commit if already prepared locally:

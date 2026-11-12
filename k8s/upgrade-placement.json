@@ -1,0 +1,16 @@
+{
+  "spec": {
+    "template": {
+      "spec": {
+        "nodeSelector": {"weather.example/worker-pool": "upgrade"},
+        "affinity": {
+          "podAntiAffinity": {
+            "requiredDuringSchedulingIgnoredDuringExecution": [
+              {"labelSelector": {"matchLabels": {"app": "weather-agent"}}, "topologyKey": "kubernetes.io/hostname"}
+            ]
+          }
+        }
+      }
+    }
+  }
+}
