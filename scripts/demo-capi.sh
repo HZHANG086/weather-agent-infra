@@ -28,7 +28,7 @@ if [ -n "$("${mgmt[@]}" get clusters.cluster.x-k8s.io -n default -o name)" ]; th
   echo "Use a fresh dedicated management cluster without existing workload Clusters." >&2
   exit 2
 fi
-clusterctl generate cluster "$workload" --kubeconfig-context "$management" --infrastructure docker \
+clusterctl generate cluster "$workload" --kubeconfig-context "$management" --infrastructure docker --flavor development \
   --kubernetes-version "$k8s_version" --control-plane-machine-count 1 --worker-machine-count 1 \
   > "$scratch/cluster.yaml"
 "${mgmt[@]}" apply -f "$scratch/cluster.yaml"
