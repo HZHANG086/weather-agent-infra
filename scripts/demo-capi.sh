@@ -48,6 +48,8 @@ clusterctl generate cluster "$workload" --kubeconfig-context "$management" --inf
 "${mgmt[@]}" -n default wait --for=create "secret/$workload-kubeconfig" --timeout=300s
 clusterctl get kubeconfig "$workload" --kubeconfig-context "$management" > "$scratch/workload.kubeconfig"
 workload_context=$(kubectl --kubeconfig "$scratch/workload.kubeconfig" config current-context)
+workload_api=$(kubectl --kubeconfig "$scratch/workload.kubeconfig" config view --minify \
+  -o jsonpath='{.clusters[0].cluster.server}')
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}:$scratch/workload.kubeconfig"
 wk=(kubectl --context "$workload_context")
 
@@ -57,16 +59,22 @@ for _ in $(seq 1 75); do
   sleep 4
 done
 "${wk[@]}" --request-timeout=10s get --raw=/readyz
-# Copy the known-working kind CNI spec from the management cluster, replacing
-# its pod range and leaving behind all source metadata and service account tokens.
+# Copy the kind CNI spec, rebind its bootstrap API endpoint and pod range to the
+# workload cluster, and leave behind source metadata and service account tokens.
 "${mgmt[@]}" -n kube-system get clusterrole/kindnet clusterrolebinding/kindnet \
   serviceaccount/kindnet daemonset/kindnet -o json > "$scratch/source-kindnet.json"
-python3 - "$scratch/source-kindnet.json" "$cidr" > "$scratch/kindnet.json" <<'PY'
+python3 - "$scratch/source-kindnet.json" "$cidr" "$workload_api" > "$scratch/kindnet.json" <<'PY'
 import json
 import sys
+from urllib.parse import urlsplit
 
 with open(sys.argv[1]) as stream:
     manifests = json.load(stream)
+api = urlsplit(sys.argv[3])
+if api.scheme != "https" or not api.hostname:
+    raise ValueError("expected an HTTPS API endpoint from the workload kubeconfig")
+values = {"POD_SUBNET": sys.argv[2], "KUBERNETES_SERVICE_HOST": api.hostname,
+          "KUBERNETES_SERVICE_PORT": str(api.port or 443)}
 for item in manifests["items"]:
     item["metadata"] = {k: v for k, v in item["metadata"].items() if k in {"name", "namespace"}}
     item.pop("status", None)
@@ -74,9 +82,9 @@ for item in manifests["items"]:
         item.pop("secrets", None)
         item.pop("imagePullSecrets", None)
     if item["kind"] == "DaemonSet":
-        (pod_subnet,) = [v for c in item["spec"]["template"]["spec"]["containers"] for v in c["env"]
-                        if v["name"] == "POD_SUBNET"]
-        pod_subnet["value"] = sys.argv[2]
+        (kindnet,) = [c for c in item["spec"]["template"]["spec"]["containers"] if c["name"] == "kindnet-cni"]
+        kindnet["env"] = [v for v in kindnet["env"] if v["name"] not in values]
+        kindnet["env"].extend({"name": k, "value": v} for k, v in values.items())
 print(json.dumps(manifests))
 PY
 "${wk[@]}" apply -f "$scratch/kindnet.json"
