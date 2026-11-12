@@ -1,0 +1,42 @@
+name: Weather Agent cluster lifecycle
+"on": [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  docker-provider:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: helm/kind-action@v1.15.1
+        with:
+          cluster_name: weather-management
+          config: k8s/capi-management.yaml
+          kubectl_version: v1.34.3
+          node_image: kindest/node:v1.34.3@sha256:08497ee19eace7b4b5348db5c6a1591d7752b164530a36f855cb0f2bdcbadd48
+          wait: 120s
+      - name: Install pinned clusterctl
+        run: |
+          mkdir -p "$RUNNER_TEMP/capi-bin"
+          curl -fsSL --retry 3 https://github.com/kubernetes-sigs/cluster-api/releases/download/v1.12.11/clusterctl-linux-amd64 \
+            -o "$RUNNER_TEMP/capi-bin/clusterctl"
+          (cd "$RUNNER_TEMP/capi-bin"; echo '6619c9c040668dbd0356bc6c30e63c2ad3cf776b8c184df5f28e06a4763b91f5  clusterctl' | sha256sum -c)
+          chmod +x "$RUNNER_TEMP/capi-bin/clusterctl"
+          echo "$RUNNER_TEMP/capi-bin" >> "$GITHUB_PATH"
+      - name: Verify node scale-up, blocked creation, recovery and scale-down
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash scripts/demo-capi.sh
+      - name: Inspect the management cluster on failure
+        if: failure()
+        run: |
+          kubectl --context kind-weather-management get pods -A -o wide || true
+          kubectl --context kind-weather-management get clusters,machinedeployments,machinesets,machines -o wide || true
+          kubectl --context kind-weather-management get events -A --sort-by=.metadata.creationTimestamp | tail -80 || true
+          kubectl --context kind-weather-management -n capd-system logs deployment/capd-controller-manager --tail=100 || true
+          docker ps -a --format '{{.Names}} {{.Status}}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: weather-capi-lifecycle-evidence
+          path: artifacts/capi-lifecycle/report.json

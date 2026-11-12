@@ -49,19 +49,56 @@ The command deploys baseline and regressed Weather Agent instances in an isolate
 
 ## Cluster API lifecycle lab
 
-This is a separate exercise for changing actual worker-node count. Use the [Cluster API Docker-provider Quick Start](https://cluster-api.sigs.k8s.io/user/quick-start), including workload networking/CNI and Docker Desktop kubeconfig instructions. The Docker provider is for development. The provided management-cluster config mounts the host Docker socket; reserve it for a disposable local lab.
+The [lifecycle workflow](.github/workflows/capi-lifecycle.yaml) starts a management
+cluster and uses Cluster API's Docker provider to create a separate workload
+cluster. It changes actual worker Nodes through the ClusterClass topology:
 
-1. Create the management cluster: `kind create cluster --name weather-management --config k8s/capi-management.yaml`. In a shell with that cluster selected, set `CLUSTER_TOPOLOGY=true` and run `clusterctl init --infrastructure docker` following the official guide. Choose compatible Kubernetes and Cluster API versions from the guide rather than assuming the locally installed versions match.
-2. Generate a ClusterClass-based Docker development manifest named `weather-workload` with one control-plane machine and one worker. Apply it to the management cluster, complete the Quick Start's CNI step, and register its kubeconfig as a separate context. You can point the CLI at the workload context immediately for Node checks; if deploying the demo there, ensure the image is loaded on every schedulable worker or publish it to a registry you control and adjust the manifest's image and pull policy.
-3. Change the worker replica count in the desired Cluster topology from 1 to 2, then reapply the manifest. Watch Cluster API reconcile. Inspect the expected count and actual Nodes while provisioning and after the second Node becomes Ready. If a minor-version upgrade is in scope, follow the [Cluster API upgrade guide](https://cluster-api.sigs.k8s.io/tasks/upgrading-clusters) and verify Node versions and readiness separately.
+1. Start with one worker, deploy the demo Weather Agent and check a synthetic rainfall query.
+2. Disable Machine creation on the existing MachineSet and request two workers.
+   Verify that the requested count reaches the MachineDeployment, the second
+   Machine is blocked, and the original worker still serves the query.
+3. Remove the block. Wait for two Ready workers, then schedule a probe on the new
+   worker. It must resolve and query the existing Weather Agent Service.
+4. Request one worker and verify the new Machine and its Node are removed.
+   Repeat the service probe on the original worker.
+
+The [read-only CLI](capi_lifecycle.py) follows topology → MachineDeployment →
+Machine → Node. It distinguishes delayed propagation, disabled Machine creation,
+bootstrap or infrastructure delays, missing Nodes, and unready or cordoned
+Nodes. The workflow saves observations and probe responses as a JSON artifact.
+The workload is a demo with synthetic observations. The probes check specific
+points during the lifecycle; they are not an uptime benchmark.
+
+To run the automation locally on Linux with Docker Engine, install `kind`,
+`kubectl`, and `clusterctl` v1.12.11 and use a fresh dedicated cluster:
+
+```bash
+kind create cluster --name weather-management --config k8s/capi-management.yaml \
+  --image kindest/node:v1.34.3 --wait 120s
+bash scripts/demo-capi.sh
+```
+
+The management cluster mounts the Docker socket for the development-only
+provider. Use a disposable host or runner. To clean up a local run, delete the
+workload Cluster first so Cluster API can remove its Docker containers, then
+delete the management cluster:
+
+```bash
+kubectl --context kind-weather-management delete clusters.cluster.x-k8s.io weather-workload --timeout=5m
+kind delete cluster --name weather-management
+```
+
+For Docker Desktop, follow the [Cluster API Quick Start](https://cluster-api.sigs.k8s.io/user/quick-start)
+for workload kubeconfig access and run the read-only CLI against both contexts:
 
 ```bash
 # Replace <workload-context> with the context you registered.
-python3 inspect_cluster.py --context '<workload-context>' \
-  --management-context kind-weather-management --capi-cluster weather-workload
+python3 capi_lifecycle.py --workload-context '<workload-context>' \
+  --management-context kind-weather-management --cluster weather-workload
 ```
 
-The CLI reads the declared replica count from the managed topology's MachineDeployments. Explicit replica counts are required; autoscaler-managed counts and MachinePools are outside this example. For Node-only inspection without the demo, Pod and Deployment reads in the default `weather` namespace can return empty lists; if your API or RBAC rejects the namespace, pass `--namespace default`.
+The lifecycle CLI expects explicit worker replica counts on a ClusterClass
+topology. MachinePools and autoscaler-managed worker counts are outside this lab.
 
 ## Publish to GitHub
 

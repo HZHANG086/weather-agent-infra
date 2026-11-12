@@ -13,12 +13,14 @@ BAD_WAIT = {
 
 
 def kubectl_json(context: str, resource: str, namespace: str | None = None,
-                 name: str | None = None) -> dict:
+                 name: str | None = None, *, selector: str | None = None) -> dict:
     command = ["kubectl", "--context", context, "--request-timeout=10s", "get", resource]
     if name is not None:
         command.append(name)
     if namespace is not None:
         command.extend(["--namespace", namespace])
+    if selector is not None:
+        command.extend(["--selector", selector])
     command.extend(["-o", "json"])
     result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=30)
     payload = json.loads(result.stdout)
