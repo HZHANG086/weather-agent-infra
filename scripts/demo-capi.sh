@@ -73,8 +73,9 @@ with open(sys.argv[1]) as stream:
 api = urlsplit(sys.argv[3])
 if api.scheme != "https" or not api.hostname:
     raise ValueError("expected an HTTPS API endpoint from the workload kubeconfig")
-values = {"POD_SUBNET": sys.argv[2], "KUBERNETES_SERVICE_HOST": api.hostname,
-          "KUBERNETES_SERVICE_PORT": str(api.port or 443)}
+# kindnet prefers its explicit endpoint over Kubernetes' service environment.
+values = {"POD_SUBNET": sys.argv[2], "CONTROL_PLANE_ENDPOINT": api.netloc,
+          "KUBERNETES_SERVICE_HOST": api.hostname, "KUBERNETES_SERVICE_PORT": str(api.port or 443)}
 for item in manifests["items"]:
     item["metadata"] = {k: v for k, v in item["metadata"].items() if k in {"name", "namespace"}}
     item.pop("status", None)
