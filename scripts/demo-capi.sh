@@ -11,7 +11,20 @@ workload=weather-workload
 cidr=192.168.0.0/16
 mgmt=(kubectl --context "$management")
 scratch=$(mktemp -d)
-trap 'rm -rf -- "$scratch"' EXIT
+cleanup() {
+  local code=$?
+  if [ "$code" -ne 0 ] && [ -n "${workload_context:-}" ]; then
+    kubectl --context "$workload_context" --request-timeout=10s get nodes,pods -A -o wide || true
+    kubectl --context "$workload_context" --request-timeout=10s -n kube-system \
+      describe daemonset/kindnet || true
+    kubectl --context "$workload_context" --request-timeout=10s -n kube-system \
+      logs -l app=kindnet --all-containers --prefix --tail=35 || true
+    kubectl --context "$workload_context" --request-timeout=10s get events -A \
+      --sort-by=.metadata.creationTimestamp | tail -55 || true
+  fi
+  rm -rf -- "$scratch"
+}
+trap cleanup EXIT
 
 if ! "${mgmt[@]}" get node weather-management-control-plane >/dev/null; then
   echo "Create the dedicated weather-management kind cluster first." >&2
@@ -44,10 +57,30 @@ for _ in $(seq 1 75); do
   sleep 4
 done
 "${wk[@]}" --request-timeout=10s get --raw=/readyz
-curl -fsSL "https://raw.githubusercontent.com/kubernetes-sigs/cluster-api/$capi_version/test/e2e/data/cni/kindnet/kindnet.yaml" \
-  -o "$scratch/kindnet-template.yaml"
-sed "s|\${DOCKER_POD_CIDRS},\${DOCKER_POD_IPV6_CIDRS}|$cidr|" "$scratch/kindnet-template.yaml" > "$scratch/kindnet.yaml"
-"${wk[@]}" apply -f "$scratch/kindnet.yaml"
+# Copy the known-working kind CNI spec from the management cluster, replacing
+# its pod range and leaving behind all source metadata and service account tokens.
+"${mgmt[@]}" -n kube-system get clusterrole/kindnet clusterrolebinding/kindnet \
+  serviceaccount/kindnet daemonset/kindnet -o json > "$scratch/source-kindnet.json"
+python3 - "$scratch/source-kindnet.json" "$cidr" > "$scratch/kindnet.json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as stream:
+    manifests = json.load(stream)
+for item in manifests["items"]:
+    item["metadata"] = {k: v for k, v in item["metadata"].items() if k in {"name", "namespace"}}
+    item.pop("status", None)
+    if item["kind"] == "ServiceAccount":
+        item.pop("secrets", None)
+        item.pop("imagePullSecrets", None)
+    if item["kind"] == "DaemonSet":
+        (pod_subnet,) = [v for c in item["spec"]["template"]["spec"]["containers"] for v in c["env"]
+                        if v["name"] == "POD_SUBNET"]
+        pod_subnet["value"] = sys.argv[2]
+print(json.dumps(manifests))
+PY
+"${wk[@]}" apply -f "$scratch/kindnet.json"
+"${wk[@]}" -n kube-system rollout status daemonset/kindnet --timeout=100s
 docker build -t weather-agent:demo .
 docker save -o "$scratch/weather-image.tar" weather-agent:demo
 
