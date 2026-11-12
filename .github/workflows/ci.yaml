@@ -1,0 +1,17 @@
+name: Weather Agent checks
+"on": [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests -v
+      - uses: helm/kind-action@v1.15.1
+        with:
+          cluster_name: weather-infra
+          config: k8s/kind.yaml
+          wait: 120s
+      - run: bash scripts/demo-kind.sh --node-failure
