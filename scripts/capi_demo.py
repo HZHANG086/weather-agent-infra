@@ -81,14 +81,29 @@ def verify_weather(context, name, node):
            "spec": {"backoffLimit": 0, "activeDeadlineSeconds": 90, "template": {"spec": pod}}}
     kubectl(context, "create", "-f", "-", document=job)
     try:
-        kubectl(context, "-n", "weather", "wait", "--for=condition=complete", f"job/{name}", "--timeout=100s")
+        deadline = time.monotonic() + 100
+        while time.monotonic() < deadline:
+            live = kubectl_json(context, "jobs", "weather", name)
+            terminal = {c["type"] for c in live.get("status", {}).get("conditions", [])
+                        if c["status"] == "True"}
+            if "Failed" in terminal:
+                raise RuntimeError(f"weather probe Job {name} failed")
+            if "Complete" in terminal:
+                break
+            time.sleep(2)
+        else:
+            raise RuntimeError(f"weather probe Job {name} timed out")
         (completed,) = kubectl_json(context, "pods", "weather", selector=f"batch.kubernetes.io/job-name={name}")["items"]
         if completed["spec"]["nodeName"] != node:
             raise RuntimeError("weather probe ran on the wrong worker")
         response = json.loads(kubectl(context, "-n", "weather", "logs", f"job/{name}"))
         return {"node": node, "response": response}
-    except (subprocess.SubprocessError, ValueError):
-        print(kubectl(context, "-n", "weather", "describe", f"job/{name}", timeout=20), flush=True)
+    except (RuntimeError, subprocess.SubprocessError, ValueError):
+        for action in ("describe", "logs"):
+            try:
+                print(kubectl(context, "-n", "weather", action, f"job/{name}", timeout=15), flush=True)
+            except subprocess.SubprocessError:
+                pass
         raise
     finally:
         kubectl(context, "-n", "weather", "delete", "job", name, "--ignore-not-found", "--timeout=45s")

@@ -19,6 +19,10 @@ cleanup() {
       describe daemonset/kindnet || true
     kubectl --context "$workload_context" --request-timeout=10s -n kube-system \
       logs -l app=kindnet --all-containers --prefix --tail=35 || true
+    kubectl --context "$workload_context" --request-timeout=10s -n kube-system \
+      logs -l k8s-app=kube-proxy --all-containers --prefix --tail=30 || true
+    kubectl --context "$workload_context" --request-timeout=10s -n kube-system \
+      logs -l k8s-app=kube-proxy --previous --prefix --tail=30 || true
     kubectl --context "$workload_context" --request-timeout=10s get events -A \
       --sort-by=.metadata.creationTimestamp | tail -55 || true
   fi
@@ -89,7 +93,25 @@ for item in manifests["items"]:
 print(json.dumps(manifests))
 PY
 "${wk[@]}" apply -f "$scratch/kindnet.json"
+# Match kind's kubeadm configuration for container nodes: do not try to change
+# the shared Linux conntrack limit from the workload kube-proxy.
+"${wk[@]}" -n kube-system get configmap/kube-proxy -o jsonpath='{.data.config\.conf}' > "$scratch/kube-proxy-config.yaml"
+python3 - "$scratch/kube-proxy-config.yaml" > "$scratch/kube-proxy-patch.json" <<'PY'
+import json
+import re
+import sys
+
+with open(sys.argv[1]) as stream:
+    config, count = re.subn(r"(?m)^(\s+maxPerCore:) *[0-9]+$", r"\1 0", stream.read())
+if count != 1:
+    raise ValueError("expected exactly one kube-proxy conntrack maxPerCore setting")
+print(json.dumps({"data": {"config.conf": config}}))
+PY
+"${wk[@]}" -n kube-system patch configmap/kube-proxy --type=merge --patch-file "$scratch/kube-proxy-patch.json"
+"${wk[@]}" -n kube-system rollout restart daemonset/kube-proxy
 "${wk[@]}" -n kube-system rollout status daemonset/kindnet --timeout=100s
+"${wk[@]}" -n kube-system rollout status daemonset/kube-proxy --timeout=100s
+"${wk[@]}" -n kube-system rollout status deployment/coredns --timeout=100s
 docker build -t weather-agent:demo .
 docker save -o "$scratch/weather-image.tar" weather-agent:demo
 
