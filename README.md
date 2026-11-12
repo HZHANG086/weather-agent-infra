@@ -79,7 +79,10 @@ bash scripts/demo-capi.sh
 ```
 
 The management cluster mounts the Docker socket for the development-only
-provider. Use a disposable host or runner. To clean up a local run, delete the
+provider. Use a disposable host or runner. The hosted workflow increases the
+runner's Linux inotify budget because nested nodes share the host limit; see
+the [Cluster API Docker prerequisites](https://cluster-api.sigs.k8s.io/user/quick-start)
+if a local kube-proxy logs `too many open files`. To clean up a local run, delete the
 workload Cluster first so Cluster API can remove its Docker containers, then
 delete the management cluster:
 

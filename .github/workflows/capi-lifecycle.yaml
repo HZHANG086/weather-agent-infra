@@ -8,6 +8,9 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - name: Raise the disposable runner's inotify budget for nested nodes
+        run: |
+          sudo sysctl -w fs.inotify.max_user_instances=1024 fs.inotify.max_user_watches=1048576
       - uses: helm/kind-action@v1.15.1
         with:
           cluster_name: weather-management
