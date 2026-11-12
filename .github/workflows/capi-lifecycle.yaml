@@ -46,6 +46,7 @@ jobs:
           kubectl --context kind-weather-management get pods -A -o wide || true
           kubectl --context kind-weather-management get clusters,machinedeployments,machinesets,machines -o wide || true
           kubectl --context kind-weather-management get events -A --sort-by=.metadata.creationTimestamp | tail -80 || true
+          kubectl --context kind-weather-management -n capi-system logs deployment/capi-controller-manager --tail=100 || true
           kubectl --context kind-weather-management -n capd-system logs deployment/capd-controller-manager --tail=100 || true
           docker ps -a --format '{{.Names}} {{.Status}}'
       - uses: actions/upload-artifact@v4

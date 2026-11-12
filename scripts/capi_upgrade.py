@@ -54,6 +54,12 @@ def worker_manifest():
                                   "kind": "DockerMachineTemplate", "name": f"{NAME}-{FROM}"},
         }},
     })
+    # CAPI applies topology's exact-version check even to independent workers
+    # attached to a topology-managed control plane. Keep all other checks,
+    # including kubeadm and kubelet version compatibility.
+    workers["metadata"]["annotations"] = {
+        "machineset.cluster.x-k8s.io/skip-preflight-checks": "ControlPlaneVersionSkew",
+    }
     return {"apiVersion": "v1", "kind": "List", "items": [bootstrap, infrastructure(FROM), infrastructure(TO), workers]}
 
 
@@ -91,7 +97,7 @@ def converged(state, version, *, replicas):
     return not replicas or (len(pods) == 2 and {p["node"] for p in pods} == {n["name"] for n in workers})
 
 
-def wait_state(context, report, predicate, description, timeout=420):
+def wait_state(context, report, predicate, description, timeout=240):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         state = snapshot(context)
@@ -175,6 +181,9 @@ def measure(samples, start, end):
 
 def run(context, archive, report):
     kubectl(context, "create", "namespace", "weather")
+    wait_state(context, report, lambda s: len(s["control_plane"]) == 1
+               and s["control_plane"][0]["ready"] and s["control_plane"][0]["version"] == TO,
+               "fixed control plane")
     kubectl(MANAGEMENT, "create", "-f", "-", document=worker_manifest())
     wait_state(context, report, lambda s: converged(s, FROM, replicas=False), "initial workers")
     # Create the namespace and Service, then apply the scheduling policy before
@@ -203,7 +212,7 @@ def run(context, archive, report):
             raise RuntimeError("control plane changed during the worker-only experiment")
         return converged(state, TO, replicas=True) and not old_uids.intersection(n["uid"] for n in state["workers"])
 
-    report["final"] = wait_state(context, report, finished, "replacement workers and split replicas")
+    report["final"] = wait_state(context, report, finished, "replacement workers and split replicas", timeout=360)
     end = report["upgraded_replicas_ready_at"] = time.time()
     time.sleep(POST_WINDOW + TIMEOUT + INTERVAL)
     report["metrics"] = measure(logs(context), start, end)

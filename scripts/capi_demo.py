@@ -64,10 +64,21 @@ def load_image(node, archive):
 def verify_weather(context, name, node):
     # Use a normal scheduler decision with a selector rather than pinning spec.nodeName.
     test = (
-        "import json, urllib.request; "
-        "r=json.load(urllib.request.urlopen('http://weather-agent:8080/ask?city=hangzhou&intent=trend', timeout=10)); "
-        "assert r['trend']=='up' and len(r['evidence'])==2, r; "
-        "print(json.dumps({'trend':r['trend'],'evidence_count':len(r['evidence'])}))"
+        "import json, time, urllib.request\n"
+        "from urllib.error import HTTPError, URLError\n"
+        "url = 'http://weather-agent:8080/ask?city=hangzhou&intent=trend'\n"
+        "for attempt in range(8):\n"
+        "    try:\n"
+        "        with urllib.request.urlopen(url, timeout=3) as response:\n"
+        "            r = json.load(response)\n"
+        "        break\n"
+        "    except HTTPError:\n"
+        "        raise\n"
+        "    except (URLError, TimeoutError):\n"
+        "        if attempt == 7: raise\n"
+        "        time.sleep(2)\n"
+        "assert r['trend']=='up' and len(r['evidence'])==2, r\n"
+        "print(json.dumps({'trend':r['trend'],'evidence_count':len(r['evidence'])}))\n"
     )
     hostname = kubectl_json(context, "nodes", name=node)["metadata"]["labels"]["kubernetes.io/hostname"]
     pod = {"restartPolicy": "Never", "automountServiceAccountToken": False,

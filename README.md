@@ -113,6 +113,8 @@ plane. The controller creates at most one surge worker; a disruption budget
 protects at least one ready Weather replica during voluntary eviction. Required
 pod anti-affinity keeps the two replicas on distinct workers. The experiment
 checks both node identities and kubelet versions before and after replacement.
+The independent lab MachineDeployment skips only CAPI's topology-specific
+exact-version check. Kubernetes and kubeadm version-skew checks still apply.
 
 A probe on the unchanged control plane sends one independent request per second
 to the Weather Service (including cluster DNS), from baseline through at least
